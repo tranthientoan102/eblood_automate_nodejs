@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>File Automate Processing</title>
+    <link rel="icon" href="/favicon.png" type="image/png">
+    <style>
+        body { font-family: sans-serif; margin: 20px; }
+        .input-group { margin-bottom: 15px; }
+        label { display: block; font-weight: bold; margin-bottom: 5px; }
+        input[type="text"], input[type="file"] { width: 100%; padding: 8px; box-sizing: border-box; border: 1px solid #ddd; }
+        button { padding: 10px 15px; cursor: pointer; }
+        #results { margin-top: 20px; border-collapse: collapse; width: 100%; border: 1px solid black; } /* Added black border to the table */
+        #results th { background-color: #f2f2f2; cursor: pointer; border: 1px solid black; } /* Added black border to table headers */
+        #results td { border: 1px solid black; padding: 8px; text-align: left; }
+        #results td:nth-child(3) {
+            white-space: pre-wrap;
+        }
+    </style>
+</head>
+<body>
+    <h1>File Automate Processing</h1>
+
+    <div class="input-group">
+        <label for="headerText">Header Text:</label>
+        <input type="text" id="headerText" value="a|b|c|d">
+    </div>
+
+    <div class="input-group">
+        <label for="downloadLocation">Network Location:</label>
+        <input type="text" id="downloadLocation" placeholder="e.g., \\server\share\folder">
+    </div>
+
+    <div class="input-group">
+        <label for="fileInput">Choose Files:</label>
+        <input type="file" id="fileInput" multiple>
+    </div>
+
+    <button onclick="processFiles()">Process Files</button>
+
+    <div id="status"></div>
+    <div id="error"></div>
+
+    <h2>Processing Results:</h2>
+    <table id="results">
+        <thead>
+            <tr>
+                <th onclick="sortTable(0)">Filename</th>
+                <th onclick="sortTable(1)">Action</th>
+                <th onclick="sortTable(2)" class="details-header">Details</th>
+            </tr>
+        </thead>
+        <tbody id="resultsBody">
+        </tbody>
+    </table>
+
+    <script>
+        let currentResults = []; // Store all results
+
+        async function processFiles() {
+            const fileInput = document.getElementById('fileInput');
+            const headerText = document.getElementById('headerText').value;
+            const downloadLocation = document.getElementById('downloadLocation').value;
+            const statusDiv = document.getElementById('status');
+            const errorDiv = document.getElementById('error');
+            const resultsBody = document.getElementById('resultsBody');
+            statusDiv.textContent = 'Processing...';
+            errorDiv.textContent = '';
+
+            const startTime = performance.now(); // Record start time
+            const formData = new FormData();
+            for (const file of fileInput.files) {
+                formData.append('fileInput', file);
+            }
+            formData.append('headerText', headerText);
+            formData.append('downloadLocation', downloadLocation);
+
+            try {
+                const response = await fetch('/process', {
+                    method: 'POST',
+                    body: formData,
+                });
+
+                if (!response.ok) {
+                    const error = await response.text();
+                    errorDiv.textContent = `Error from server: ${error}`;
+                    return;
+                }
+
+                const newResults = await response.json();
+                statusDiv.textContent = 'Processing complete.';
+
+                const endTime = performance.now(); // Record end time
+                const duration = (endTime - startTime) / 1000; // Convert to seconds
+                statusDiv.textContent = `Processing complete in ${duration.toFixed(2)} seconds.`;
+
+                // Append new results
+                currentResults = currentResults.concat(newResults);
+                displayResults();
+
+            } catch (err) {
+                errorDiv.textContent = `Error during upload/processing: ${err}`;
+            } finally {
+                // fileInput.value = ''; // Clear file input
+            }
+        }
+
+        function displayResults() {
+            const resultsBody = document.getElementById('resultsBody');
+            resultsBody.innerHTML = ''; // Clear the table body
+
+            currentResults.forEach(result => {
+                const row = resultsBody.insertRow();
+                row.insertCell().textContent = result.filename;
+                row.insertCell().textContent = result.action;
+                row.insertCell().textContent = result.details;
+            });
+        }
+
+        function sortTable(columnIndex) {
+            const table = document.getElementById("results");
+            let rows, switching, i, x, y, shouldSwitch, dir, switchcount = 0;
+            switching = true;
+            dir = "asc";
+            while (switching) {
+                switching = false;
+                rows = table.rows;
+                for (i = 1; i < (rows.length - 1); i++) {
+                    shouldSwitch = false;
+                    x = rows[i].getElementsByTagName("TD")[columnIndex];
+                    y = rows[i + 1].getElementsByTagName("TD")[columnIndex];
+                    if (dir === "asc") {
+                        if (x.innerHTML.toLowerCase() > y.innerHTML.toLowerCase()) {
+                            shouldSwitch = true;
+                            break;
+                        }
+                    } else if (dir === "desc") {
+                        if (x.innerHTML.toLowerCase() < y.innerHTML.toLowerCase()) {
+                            shouldSwitch = true;
+                            break;
+                        }
+                    }
+                }
+                if (shouldSwitch) {
+                    rows[i].parentNode.insertBefore(rows[i + 1], rows[i]);
+                    switching = true;
+                    switchcount++;
+                } else {
+                    if (switchcount === 0 && dir === "asc") {
+                        dir = "desc";
+                        switching = true;
+                    }
+                }
+            }
+        }
+    </script>
+</body>
+</html>
