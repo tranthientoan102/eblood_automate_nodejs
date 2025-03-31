@@ -22,12 +22,14 @@
 
     <div class="input-group">
         <label for="headerText">Header Text:</label>
-        <input type="text" id="headerText" value="a|b|c|d">
+        <input type="text" id="headerText" 
+            value="labno|urno|name1|name2|address|dob|sex|medicare|veteran|pension|location|collected">
     </div>
 
     <div class="input-group">
         <label for="downloadLocation">Network Location:</label>
-        <input type="text" id="downloadLocation" placeholder="e.g., \\server\share\folder">
+        <input type="text" id="downloadLocation" placeholder="e.g., \\server\share\folder" 
+            value="U:\Data Migration (Secure)\EBLOOD\AUTODUMPS\">
     </div>
 
     <div class="input-group">
@@ -56,7 +58,58 @@
     <script>
         let currentResults = []; // Store all results
 
+        // async function processFiles() {
+        //     const fileInput = document.getElementById('fileInput');
+        //     const headerText = document.getElementById('headerText').value;
+        //     const downloadLocation = document.getElementById('downloadLocation').value;
+        //     const statusDiv = document.getElementById('status');
+        //     const errorDiv = document.getElementById('error');
+        //     const resultsBody = document.getElementById('resultsBody');
+        //     statusDiv.textContent = 'Processing...';
+        //     errorDiv.textContent = '';
+
+        //     const startTime = performance.now(); // Record start time
+        //     const formData = new FormData();
+        //     for (const file of fileInput.files) {
+        //         formData.append('fileInput', file);
+        //     }
+        //     formData.append('headerText', headerText);
+        //     formData.append('downloadLocation', downloadLocation);
+
+        //     try {
+        //         const response = await fetch('/process', {
+        //             method: 'POST',
+        //             body: formData,
+        //         });
+
+        //         if (!response.ok) {
+        //             const error = await response.text();
+        //             errorDiv.textContent = `Error from server: ${error}`;
+        //             return;
+        //         }
+
+        //         const newResults = await response.json();
+        //         statusDiv.textContent = 'Processing complete.';
+
+        //         const endTime = performance.now(); // Record end time
+        //         const duration = (endTime - startTime) / 1000; // Convert to seconds
+        //         statusDiv.textContent = `Processing complete in ${duration.toFixed(2)} seconds.`;
+
+        //         // Append new results
+        //         currentResults = currentResults.concat(newResults);
+        //         displayResults();
+
+        //     } catch (err) {
+        //         errorDiv.textContent = `Error during upload/processing: ${err}`;
+        //     } finally {
+        //         // fileInput.value = ''; // Clear file input
+        //     }
+        // }
+
         async function processFiles() {
+
+            const startTime = performance.now(); // Record start time
+
             const fileInput = document.getElementById('fileInput');
             const headerText = document.getElementById('headerText').value;
             const downloadLocation = document.getElementById('downloadLocation').value;
@@ -65,8 +118,9 @@
             const resultsBody = document.getElementById('resultsBody');
             statusDiv.textContent = 'Processing...';
             errorDiv.textContent = '';
+            resultsBody.innerHTML = ''; // Clear previous results
+            currentResults = []; // Reset results
 
-            const startTime = performance.now(); // Record start time
             const formData = new FormData();
             for (const file of fileInput.files) {
                 formData.append('fileInput', file);
@@ -75,6 +129,36 @@
             formData.append('downloadLocation', downloadLocation);
 
             try {
+
+                // Start the SSE connection to a dedicated endpoint
+                const eventSource = new EventSource('/process-updates'); // Fixed endpoint for SSE
+
+                eventSource.onmessage = (event) => {
+                    // const data = JSON.stringify(JSON.parse(event.data));
+                    const data = JSON.parse(event.data);
+                    console.log(`Received data: ${JSON.stringify(data)}`);
+
+                    currentResults.push(data);
+                    displayResults()
+
+                    if (data.details === '[DONE]') {
+                        statusDiv.textContent = 'Processing complete.';
+                        eventSource.close(); // Close the connection
+
+                        const endTime = performance.now(); // Record end time
+                        const duration = (endTime - startTime) / 1000; // Convert to 
+                        statusDiv.textContent = `Processing complete in ${duration.toFixed(2)} seconds.`;
+                    }
+                };
+
+                eventSource.onerror = (error) => {
+                    console.error('SSE error:', error);
+                    errorDiv.textContent = 'Error receiving updates from the server.';
+                    eventSource.close();
+                };
+
+
+                // Send the file upload request
                 const response = await fetch('/process', {
                     method: 'POST',
                     body: formData,
@@ -86,24 +170,11 @@
                     return;
                 }
 
-                const newResults = await response.json();
-                statusDiv.textContent = 'Processing complete.';
-
-                const endTime = performance.now(); // Record end time
-                const duration = (endTime - startTime) / 1000; // Convert to seconds
-                statusDiv.textContent = `Processing complete in ${duration.toFixed(2)} seconds.`;
-
-                // Append new results
-                currentResults = currentResults.concat(newResults);
-                displayResults();
-
+                
             } catch (err) {
                 errorDiv.textContent = `Error during upload/processing: ${err}`;
-            } finally {
-                // fileInput.value = ''; // Clear file input
             }
         }
-
         function displayResults() {
             const resultsBody = document.getElementById('resultsBody');
             resultsBody.innerHTML = ''; // Clear the table body
