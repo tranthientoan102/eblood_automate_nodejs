@@ -1,8 +1,10 @@
 const express = require('express');
 const fileUpload = require('express-fileupload');
-const path = require('path');
 const fs = require('node:fs/promises');
 const { exec } = require('child_process');
+
+const os = require('os');
+const path = require('path');
 
 const app = express();
 const port = 3000; // You can choose a different port
@@ -51,19 +53,31 @@ function processContent(headerToAdd, content, result_processContent) {
         break; // No more '|0|' found, break the loop
       }
     }
+
+    // Replace all occurrences of '??:??'
+    for (let i = 0; ; i++) { // Loop will run once
+        if (modifiedContent.includes('??:??')) {
+            modifiedContent = modifiedContent.replace(/\?\?\:\?\?/g, '00:00');
+            result_processContent.details += `- [${i}]replaced ??:?? with 00:00\n`;
+        } else {
+            break; // No more '|0|' found, break the loop
+        }
+    }
   
     return modifiedContent;
 }
 
-async function copyToNetwork(outputFilePath, networkLocation, result_copy) {
+async function copyToNetwork(outputFilePath, networkLocation, originalName, result_copy) {
     if (networkLocation) {
+        networkLocation = networkLocation.endsWith('\\') ? networkLocation: `${networkLocation}\\`;
 
         const copyPromise = new Promise((resolve, reject) => {    
             let cp = 'cp'
             if (process.platform === 'win32') {
                 cp = 'copy'
             }
-            const copyCommand = `${cp} "${outputFilePath}" "${networkLocation}"`;
+            const copyCommand = `${cp} "${outputFilePath}" "${networkLocation}${originalName}"`;
+            console.log(`copyCommand: ${copyCommand}`)
 
             result_copy.details += `copyCommand: ${copyCommand}\n`;
             exec(copyCommand, (error, stdout, stderr) => {
@@ -91,6 +105,79 @@ async function copyToNetwork(outputFilePath, networkLocation, result_copy) {
 
 
 
+// app.post('/process', async (req, res) => {
+//     if (!req.files || Object.keys(req.files).length === 0) {
+//         return res.status(400).send('No files were uploaded.');
+//     }
+
+//     const uploadedFiles = Array.isArray(req.files.fileInput) ? req.files.fileInput : [req.files.fileInput];
+//     const headerText = req.body.headerText || 'a|b|c|d';
+//     const networkLocation = req.body.downloadLocation;
+//     const results = [];
+
+//     const copyPromises = []; // Array to store promises for each copy operation
+
+
+//     for (const file of uploadedFiles) {
+//         const originalName = file.name;
+//         const fileExtension = path.extname(file.name).toLowerCase();
+
+//         try {
+//             switch (fileExtension) {
+//                 case '.txt':
+                
+//                     const content = file.data.toString('utf8');
+//                     console.log(`Processing: ${originalName}`);
+
+//                     const result_processContent = { filename: originalName, action: '1_processContent', details: '' }
+//                     const modifiedContent = processContent(headerText, content, result_processContent);
+//                     results.push(result_processContent);
+                    
+//                     const parsedPath = path.parse(originalName);
+//                     const outputFileName = `${parsedPath.name}_output${parsedPath.ext}`;
+//                     const outputPath = path.join(os.homedir(), 'Downloads');
+//                     const outputFilePath = path.join(outputPath, outputFileName); // Temporary save
+//                     await fs.writeFile(outputFilePath, modifiedContent, 'utf8');
+//                     results.push({ filename: originalName, action: '2_backup', details: 'Output created' });
+
+//                     let result_copy = { filename: originalName, action: '3_copy', details: '' }
+//                     const copyPromise = copyToNetwork(outputFilePath, networkLocation, originalName, result_copy);
+//                     results.push(result_copy);
+//                     copyPromises.push(copyPromise);
+//                     break;
+//                 case '.xlsx':
+//                     let result_copy_xlsx = { filename: originalName, action: '3_copy', details: '' }
+//                     const xlsxFilePath = path.join(os.homedir(), 'Downloads', originalName);
+//                     const copyPromise_xlsx = copyToNetwork(xlsxFilePath, networkLocation, originalName, result_copy_xlsx);
+//                     results.push(result_copy_xlsx);
+//                     copyPromises.push(copyPromise_xlsx);
+//                     break;
+//                 default:
+//                     console.log(`Unsupported file extension: ${fileExtension}. Skipping.`);
+//                 }
+//         } catch (error) {
+//             console.error(`Error processing ${originalName}: ${error}`);
+//             result_general = { filename: originalName, action: '4_general', details: `Error: ${error}` };
+//             results.push(result_general);
+//         }
+//     }
+
+//     // let result_copy = { filename: "BBIS*", action: '3_copy', details: '' };
+//     // try {
+//     //     await copyToNetwork("BBIS*", networkLocation, result_copy);
+        
+//     // } catch (error) {
+//     //     console.error('Error copying file:', error);
+//     //     result_copy.details += `Error: ${error.stderr || error.message}\n`;
+//     // }
+//     // results.push(result_copy);
+
+//     await Promise.allSettled(copyPromises);
+
+//     // Send the processing results back to the client
+//     res.json(results);
+// });
+
 app.post('/process', async (req, res) => {
     if (!req.files || Object.keys(req.files).length === 0) {
         return res.status(400).send('No files were uploaded.');
@@ -99,55 +186,69 @@ app.post('/process', async (req, res) => {
     const uploadedFiles = Array.isArray(req.files.fileInput) ? req.files.fileInput : [req.files.fileInput];
     const headerText = req.body.headerText || 'a|b|c|d';
     const networkLocation = req.body.downloadLocation;
-    const results = [];
+
+    // Set up SSE response headers
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+
+    const sendUpdate = (data) => {
+        res.write(`data: ${JSON.stringify(data)}\n\n`);
+    };
 
     const copyPromises = []; // Array to store promises for each copy operation
 
-
     for (const file of uploadedFiles) {
         const originalName = file.name;
+        const fileExtension = path.extname(file.name).toLowerCase();
+
         try {
-            const content = file.data.toString('utf8');
-            console.log(`Processing: ${originalName}`);
+            switch (fileExtension) {
+                case '.txt':
+                    const content = file.data.toString('utf8');
+                    console.log(`Processing: ${originalName}`);
 
-            const result_processContent = { filename: originalName, action: '1_processContent', details: '' }
-            const modifiedContent = processContent(headerText, content, result_processContent);
-            results.push(result_processContent);
-            
-            const parsedPath = path.parse(originalName);
-            const outputFileName = `${parsedPath.name}_output${parsedPath.ext}`;
-            const outputFilePath = path.join(__dirname, 'temp_outputs', outputFileName); // Temporary save
-            await fs.writeFile(outputFilePath, modifiedContent, 'utf8');
-            results.push({ filename: originalName, action: '2_backup', details: 'Backup created' });
+                    const result_processContent = { filename: originalName, action: '1_processContent', details: '' };
+                    const modifiedContent = processContent(headerText, content, result_processContent);
+                    sendUpdate(result_processContent); // Send update to client
 
-            let result_copy = { filename: originalName, action: '3_copy', details: '' }
-            const copyPromise = copyToNetwork(outputFilePath, networkLocation, result_copy);
-            results.push(result_copy);
-            copyPromises.push(copyPromise);
+                    const parsedPath = path.parse(originalName);
+                    const outputFileName = `${parsedPath.name}_output${parsedPath.ext}`;
+                    const outputPath = path.join(os.homedir(), 'Downloads');
+                    const outputFilePath = path.join(outputPath, outputFileName); // Temporary save
+                    await fs.writeFile(outputFilePath, modifiedContent, 'utf8');
+                    sendUpdate({ filename: originalName, action: '2_backup', details: 'Output created' });
 
-
+                    let result_copy = { filename: originalName, action: '3_copy', details: '' };
+                    const copyPromise = copyToNetwork(outputFilePath, networkLocation, originalName, result_copy);
+                    sendUpdate(result_copy); // Send update to client
+                    copyPromises.push(copyPromise);
+                    break;
+                case '.xlsx':
+                    let result_copy_xlsx = { filename: originalName, action: '3_copy', details: '' };
+                    const xlsxFilePath = path.join(os.homedir(), 'Downloads', originalName);
+                    const copyPromise_xlsx = copyToNetwork(xlsxFilePath, networkLocation, originalName, result_copy_xlsx);
+                    sendUpdate(result_copy_xlsx); // Send update to client
+                    copyPromises.push(copyPromise_xlsx);
+                    break;
+                default:
+                    console.log(`Unsupported file extension: ${fileExtension}. Skipping.`);
+                    sendUpdate({ filename: originalName, action: 'unsupported', details: `Unsupported file extension: ${fileExtension}` });
+            }
         } catch (error) {
             console.error(`Error processing ${originalName}: ${error}`);
-            result_general = { filename: originalName, action: '4_general', details: `Error: ${error}` };
-            results.push(result_general);
+            const result_general = { filename: originalName, action: '4_general', details: `Error: ${error}` };
+            sendUpdate(result_general); // Send error update to client
         }
     }
 
-    // let result_copy = { filename: "BBIS*", action: '3_copy', details: '' };
-    // try {
-    //     await copyToNetwork("BBIS*", networkLocation, result_copy);
-        
-    // } catch (error) {
-    //     console.error('Error copying file:', error);
-    //     result_copy.details += `Error: ${error.stderr || error.message}\n`;
-    // }
-    // results.push(result_copy);
-
     await Promise.allSettled(copyPromises);
 
-    // Send the processing results back to the client
-    res.json(results);
+    // Notify the client that processing is complete
+    res.write('data: [DONE]\n\n');
+    res.end();
 });
+
 
 app.listen(port, () => {
     console.log(`Server listening at http://localhost:${port}`);
