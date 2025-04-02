@@ -52,7 +52,8 @@ function processContent(headerToAdd, content, result_processContent) {
 
 async function copyToNetwork(outputFilePath, networkLocation, originalName) {
     if (networkLocation) {
-        networkLocation = networkLocation.endsWith('\\') ? networkLocation : `${networkLocation}\\`;
+        // build the path to the network location - OS independent
+        copyToFilePath = path.join(networkLocation, originalName);
 
         const copyPromise = new Promise((resolve, reject) => {
             let result_copy = { filename: originalName, action: '3_copy', details: '' };
@@ -61,7 +62,7 @@ async function copyToNetwork(outputFilePath, networkLocation, originalName) {
             if (process.platform === 'win32') {
                 cp = 'copy';
             }
-            const copyCommand = `${cp} "${outputFilePath}" "${networkLocation}${originalName}"`;
+            const copyCommand = `${cp} "${outputFilePath}" "${copyToFilePath}"`;
             console.log(`copyCommand: ${copyCommand}`);
 
             result_copy.details += `copyCommand: ${copyCommand}\n`;
@@ -73,7 +74,7 @@ async function copyToNetwork(outputFilePath, networkLocation, originalName) {
                     console.error(`  - Network copy stderr for ${outputFilePath}: ${stderr}`);
                     result_copy.details += `Std error: ${stderr}\n`;
                 } else {
-                    console.log(`  - Copied ${outputFilePath} to network: ${networkLocation}`);
+                    console.log(`  - Copied ${outputFilePath} to network: ${copyToFilePath}`);
                     result_copy.details += `Done! ${stdout}\n`;
                     console.log(stdout);
                 }
